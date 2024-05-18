@@ -12,37 +12,13 @@ import cv2
 import os
 from PyQt5.QtWidgets import QLabel, QPushButton, QApplication, QMainWindow
 from PyQt5.QtGui import QIcon, QPixmap
+import torch
+from PIL import Image
+import numpy as np
 
 #import face_recognition
-
-win_init_height = 600
-win_init_width = 750
-img_init_height = 500
-img_init_width = 650
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
-eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-
-
-# def resize_window(window, aspect_ratio):
-#     window.setGeometry(0, 0, win_init_width, int(img_init_width / aspect_ratio) + 100)
-#     qtRectangle = window.frameGeometry()
-#     centerPoint = QDesktopWidget().availableGeometry().center()
-#     qtRectangle.moveCenter(centerPoint)
-#     window.move(qtRectangle.topLeft())
-#     window.image_label.setGeometry(
-#         50, 70, img_init_width, int(img_init_width / aspect_ratio)
-#     )
-
-def resize_window(aspect_ratio):
-    # Example implementation (you'll need to adapt this based on what you want to do)
-    print(f"Adjusting window size based on aspect ratio: {aspect_ratio}")
-    # Here you would set the size of your window based on the aspect ratio
-    # For instance, you might want a window width of 600 pixels
-    width = 600
-    height = int(width / aspect_ratio)
-    print(f"Setting window size to {width}x{height}")
+# model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 
 class AgeDetectionUI(QWidget):
@@ -62,7 +38,7 @@ class AgeDetectionUI(QWidget):
         
         uniform_width = 200
         uniform_height = 200
-
+        
         def load_and_resize_image(filepath, width, height):
             pixmap = QPixmap(filepath)
             return pixmap.scaled(width, height)
@@ -101,6 +77,24 @@ class AgeDetectionUI(QWidget):
         self.timer.timeout.connect(self.update_frame)
         self.faces = None
 
+        self.image_label = QLabel(self)
+        self.image_label.setGeometry(100, 300, 600, 400)
+        def closeEvent(self, event):
+            if self.cap is not None:
+                self.cap.release()
+
+    def display_resized_image(self, image, target_width=600, target_height=400):
+        if image is not None:
+            resized_img = cv2.resize(image, (target_width, target_height))
+            height, width, channel = resized_img.shape
+            bytes_per_line = 3 * width
+            q_img = QImage(resized_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            self.image_label.setPixmap(QPixmap.fromImage(q_img))
+            self.image_label.setGeometry(150, 300, target_width, target_height)  # Adjust position as needed
+        else:
+            print("Error: Unable to load the image. Check the file path and format.")
+
+
     def select_image(self):
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
@@ -113,24 +107,21 @@ class AgeDetectionUI(QWidget):
         )
 
         if file_path:
-            if self.video_playing:
-                self.cap.release()
-                self.video_playing = False
-                if self.timer:
-                    self.timer.stop()
-
             self.image_path = file_path
-            pixmap = QPixmap(file_path)
-
             img = cv2.imread(file_path)
-            if img is not None:
-                resized_img = cv2.resize(img, (600, 600))
-                height, width, channel = resized_img.shape
-                bytes_per_line = 3 * width
-                q_img = QImage(resized_img.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-                self.image_label.setPixmap(QPixmap.fromImage(q_img))
-            else:
-                print("Error: Unable to load the image. Check the file path and format.")
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Detect faces
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
+            
+            # Draw rectangles around the faces
+            for (x, y, w, h) in faces:
+                cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            
+            # Convert the image to display in PyQt
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            self.display_resized_image(img)
+
 
     def select_video(self):
         options = QFileDialog.Options()
@@ -145,13 +136,12 @@ class AgeDetectionUI(QWidget):
         if file_path:
             self.video_path = file_path
             self.cap = cv2.VideoCapture(file_path)
+            if not self.cap.isOpened():
+                print("Error: Unable to open the video file.")
+                return
             self.video_playing = True
             self.timer.start(30)
-            ret, frame = self.cap.read()
-            if ret:
-                h, w, ch = frame.shape
-                aspect_ratio = w / h
-                resize_window(self, aspect_ratio)
+
 
     def select_camera(self):
         if self.video_playing:
@@ -162,34 +152,22 @@ class AgeDetectionUI(QWidget):
         self.cap = cv2.VideoCapture(0)
         self.video_playing = True
         self.timer.start(30)
-        ret, frame = self.cap.read()
-        if ret:
-            h, w, ch = frame.shape
-            aspect_ratio = w / h
-            resize_window(self, aspect_ratio)
 
     def update_frame(self):
         ret, frame = self.cap.read()
         if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            self.video_frame = frame
-            h, w, ch = frame.shape
-            bytes_per_line = ch * w
-            q_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(q_image)
-
-            aspect_ratio = w / h
-            self.image_label.setPixmap(
-                pixmap.scaled(img_init_width, int(img_init_width / aspect_ratio))
-            )
-
-            face_recognition.detect_faces_and_eyes(
-                self,
-                cv2.resize(frame, (img_init_width, int(img_init_width / aspect_ratio))),
-                face_cascade,
-                eye_cascade,
-            )
-
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # Detect faces
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
+            
+            # Draw rectangles around the faces
+            for (x, y, w, h) in faces:
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            
+            # Convert the frame to RGB for display in PyQt
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            self.display_resized_image(frame_rgb)
         else:
             self.video_playing = False
             self.timer.stop()
@@ -213,16 +191,12 @@ class AgeDetectionUI(QWidget):
 
             age_result_label = QLabel(self)
             age_result_label.setGeometry(200, 460, 100, 30)
-            age_result_label.setText("Emotioon: ")  # Replace XX with actual age result
+            age_result_label.setText("Emotioon: ")  
 
     def keyPressEvent(self, event):
         if event.key() == 32 and self.video_playing:
             self.video_playing = False
             self.timer.stop()
-
-    def closeEvent(self, event):
-        if self.cap is not None:
-            self.cap.release()
 
 
 if __name__ == "__main__":
