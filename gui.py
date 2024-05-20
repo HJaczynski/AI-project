@@ -15,9 +15,10 @@ from PyQt5.QtGui import QIcon, QPixmap
 import torch
 from PIL import Image
 import numpy as np
+from tensorflow.keras.models import load_model
+import tensorflow as tf
 
-#import face_recognition
-# model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+emotion_model = load_model('my_model.h5')
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 
@@ -67,7 +68,7 @@ class AgeDetectionUI(QWidget):
         self.select_image_button.clicked.connect(self.select_image)
         self.select_video_button.clicked.connect(self.select_video)
         self.select_camera_button.clicked.connect(self.select_camera)
-        self.detect_age_button.clicked.connect(self.detect_age)
+        self.detect_age_button.clicked.connect(self.detect_emotion)
 
         self.image_path = None
         self.video_path = None
@@ -90,7 +91,7 @@ class AgeDetectionUI(QWidget):
             bytes_per_line = 3 * width
             q_img = QImage(resized_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
             self.image_label.setPixmap(QPixmap.fromImage(q_img))
-            self.image_label.setGeometry(150, 300, target_width, target_height)  # Adjust position as needed
+            self.image_label.setGeometry(150, 300, target_width, target_height) 
         else:
             print("Error: Unable to load the image. Check the file path and format.")
 
@@ -111,16 +112,28 @@ class AgeDetectionUI(QWidget):
             img = cv2.imread(file_path)
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            # Detect faces
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
             
-            # Draw rectangles around the faces
-            for (x, y, w, h) in faces:
-                cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            img_color = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             
-            # Convert the image to display in PyQt
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            self.display_resized_image(img)
+            for (x, y, w, h) in faces:
+                face_roi = gray[y:y+h, x:x+w]
+                face_roi_color = img_color[y:y+h, x:x+w]
+                face_roi_resized = cv2.resize(face_roi_color, (48, 48))
+                
+                face_array = np.expand_dims(face_roi_resized, axis=0)
+                face_array = face_array / 255.0  
+
+                emotion_prediction = emotion_model.predict(face_array)[0]  
+                emotions = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
+                prediction_text = ""
+                for idx, emotion in enumerate(emotions):
+                    prediction_text += f"{emotion}: {emotion_prediction[idx] * 100:.2f}% "
+
+                cv2.rectangle(img_color, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                cv2.putText(img_color, prediction_text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (36, 255, 12), 1)
+
+            self.display_resized_image(img_color)
 
 
     def select_video(self):
@@ -142,7 +155,6 @@ class AgeDetectionUI(QWidget):
             self.video_playing = True
             self.timer.start(30)
 
-
     def select_camera(self):
         if self.video_playing:
             self.cap.release()
@@ -157,41 +169,33 @@ class AgeDetectionUI(QWidget):
         ret, frame = self.cap.read()
         if ret:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
-            # Detect faces
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
+
+            if len(faces) > 0:  
+                faces_data = []
+                for (x, y, w, h) in faces:
+                    face_roi_color = frame[y:y+h, x:x+w]
+                    face_roi_resized = cv2.resize(face_roi_color, (48, 48))
+                    face_array = face_roi_resized / 255.0
+                    faces_data.append(face_array)
+                
+                if faces_data:
+                    faces_array = np.array(faces_data)
+                    emotions_predictions = emotion_model.predict(faces_array)
+                    
+                    for i, (x, y, w, h) in enumerate(faces):
+                        emotion_label = np.argmax(emotions_predictions[i])
+                        emotions = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
+                        predicted_emotion = emotions[emotion_label]
+
+                        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                        cv2.putText(frame, predicted_emotion, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36,255,12), 2)
             
-            # Draw rectangles around the faces
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            
-            # Convert the frame to RGB for display in PyQt
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            self.display_resized_image(frame_rgb)
+            frame_color = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            self.display_resized_image(frame_color)
         else:
             self.video_playing = False
             self.timer.stop()
-
-    def detect_age(self):
-        if self.faces is not None:
-            # age detection here
-
-            qp = QPainter(self.image_label.pixmap())
-            pen = QPen(Qt.white, 4)
-            qp.setPen(pen)
-            font = QFont()
-            font.setFamily("Times")
-            font.setBold(True)
-            font.setPointSize(20)
-            qp.setFont(font)
-            for x, y, w, h in self.faces:
-                qp.drawText(x, y + h + 30, "Emotion: ")
-
-            qp.end()
-
-            age_result_label = QLabel(self)
-            age_result_label.setGeometry(200, 460, 100, 30)
-            age_result_label.setText("Emotioon: ")  
 
     def keyPressEvent(self, event):
         if event.key() == 32 and self.video_playing:
