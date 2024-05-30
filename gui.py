@@ -61,14 +61,9 @@ class AgeDetectionUI(QWidget):
         self.select_camera_button.setIcon(QIcon(select_camera_pixmap))
         self.select_camera_button.setIconSize(select_camera_pixmap.size())
         self.select_camera_button.setGeometry(600, 20, uniform_width, uniform_height)
-
-        self.detect_age_button = QPushButton("Detect Emotion", self)
-        self.detect_age_button.setGeometry(400, 250, 100, 30)
-
         self.select_image_button.clicked.connect(self.select_image)
-        self.select_video_button.clicked.connect(self.select_video)
-        self.select_camera_button.clicked.connect(self.select_camera)
-        self.detect_age_button.clicked.connect(self.detect_emotion)
+        self.select_video_button.clicked.connect(self.select_camera)
+        self.select_camera_button.clicked.connect(self.select_video)
 
         self.image_path = None
         self.video_path = None
