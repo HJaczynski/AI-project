@@ -12,7 +12,6 @@ import cv2
 import os
 from PyQt5.QtWidgets import QLabel, QPushButton, QApplication, QMainWindow
 from PyQt5.QtGui import QIcon, QPixmap
-import torch
 from PIL import Image
 import numpy as np
 from tensorflow.keras.models import load_model
